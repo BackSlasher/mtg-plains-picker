@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plains Picker</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one screen. Tally bar on top, the card fills the middle, three verdict buttons at the bottom.
+   Verdicts are told apart by symbol and label first, colour second (blue yes, orange no, grey maybe). */
+:root {
+  --bg: #e9edf0; --panel: #f7f9fa; --fg: #17202a; --dim: #56636f; --line: #c3ccd4;
+  --yes: #0067a3; --no: #b85a00; --maybe: #5a6672; --on: #ffffff;
+  --display: "Schibsted Grotesk", "Segoe UI", system-ui, sans-serif;
+  --data: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #12171c; --panel: #1b2229; --fg: #e8edf1; --dim: #9aa7b3; --line: #35414c;
+  --yes: #4aa8e0; --no: #f0a23c; --maybe: #9aa7b3; --on: #0d1115; color-scheme: dark } }
+
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--display); font-size: 15px; }
+[hidden] { display: none !important; }
+.app { height: 100%; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;
+  padding-top: max(10px, env(safe-area-inset-top, 0px)); padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 760px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+h1 { font-size: 20px; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
+.tally { display: flex; flex-wrap: wrap; gap: 6px; font-family: var(--data); font-size: 13px; font-variant-numeric: tabular-nums; flex: 1; min-width: 0; }
+.tally span { padding: 3px 8px; border: 1.5px solid var(--line); border-radius: 4px; white-space: nowrap; }
+.tally .y { border-color: var(--yes); color: var(--yes); font-weight: 600; }
+.tally .n { border-color: var(--no); color: var(--no); }
+.tally .m { border-style: dashed; }
+.actions { display: flex; gap: 8px; }
+button { font: inherit; color: inherit; cursor: pointer; border-radius: 6px; border: 1.5px solid var(--line); background: var(--panel); padding: 8px 12px; }
+button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: default; }
+.status { font-size: 12.5px; color: var(--dim); min-height: 1.2em; }
+
+#sort { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; touch-action: none; user-select: none; }
+.stage img { max-height: 100%; max-width: 100%; border-radius: 4.2% / 3%; box-shadow: 0 6px 22px rgb(0 0 0 / 0.3); will-change: transform; -webkit-user-drag: none; }
+.stamp { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); font-weight: 800; font-size: 22px; padding: 4px 14px; border-radius: 6px; background: var(--panel); border: 3px solid currentColor; pointer-events: none; }
+.stamp.y { color: var(--yes); } .stamp.n { color: var(--no); } .stamp.m { color: var(--maybe); border-style: dashed; }
+.meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 14px; }
+.meta .where { font-weight: 600; min-width: 0; }
+.meta .data { font-family: var(--data); font-size: 13px; color: var(--dim); }
+a { color: inherit; }
+.verdicts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.verdicts button { font-weight: 800; font-size: 17px; padding: 12px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.verdicts kbd { font-family: var(--data); font-size: 11px; font-weight: 400; opacity: 0.85; }
+#bNo { background: var(--no); border-color: var(--no); color: var(--on); }
+#bYes { background: var(--yes); border-color: var(--yes); color: var(--on); }
+#bMaybe { border: 2px dashed var(--maybe); }
+.row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.done { margin: auto; text-align: center; max-width: 34ch; }
+
+#catalog { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.filters button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.filters #fClear { border-style: dashed; }
+.grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; align-content: start; padding: 2px; }
+.thumb { position: relative; padding: 0; border: 0; background: none; border-radius: 5px; line-height: 0; }
+.thumb img { width: 100%; aspect-ratio: 488 / 680; border-radius: 5px; background: var(--line); }
+.thumb b { position: absolute; right: 4px; bottom: 4px; line-height: 1; font-size: 13px; padding: 3px 6px; border-radius: 4px; background: var(--panel); border: 2px solid currentColor; }
+.thumb b.y { color: var(--yes); } .thumb b.n { color: var(--no); } .thumb b.m { color: var(--maybe); border-style: dashed; }
+.empty { color: var(--dim); padding: 20px 0; }
+footer { font-size: 11px; color: var(--dim); }
+@media (max-width: 480px) { .verdicts kbd { display: none; } h1 { font-size: 18px; } footer { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Plains Picker</h1>
+    <div class="tally" aria-live="polite">
+      <span class="y" id="tY">✓ Yes 0/120</span>
+      <span class="m" id="tM">? Maybe 0</span>
+      <span class="n" id="tN">✕ No 0</span>
+      <span id="tL">Undecided –</span>
+    </div>
+    <div class="actions">
+      <button id="viewBtn" type="button">Show catalog</button>
+      <button id="bExport" type="button">Export JSON</button>
+    </div>
+  </header>
+
+  <section id="sort">
+    <div class="stage" id="stage">
+      <img id="card" alt="" draggable="false">
+      <div class="stamp" id="stamp" hidden></div>
+      <p class="done" id="done" hidden>Every card has a verdict. Open the catalog to change one, or export your picks.</p>
+    </div>
+    <div class="meta">
+      <span class="where" id="mWhere">Loading the cards…</span>
+      <span class="data" id="mData"></span>
+    </div>
+    <div class="verdicts">
+      <button id="bNo" type="button">✕ No<kbd>← or A</kbd></button>
+      <button id="bMaybe" type="button">? Maybe<kbd>↓ or S</kbd></button>
+      <button id="bYes" type="button">✓ Yes<kbd>→ or D</kbd></button>
+    </div>
+    <div class="row">
+      <button id="bUndo" type="button" disabled>Undo (Z)</button>
+      <span class="status" id="status"></span>
+    </div>
+  </section>
+
+  <section id="catalog" hidden>
+    <div class="filters" id="filters">
+      <button type="button" data-f="y" aria-pressed="false">✓ Yes</button>
+      <button type="button" data-f="m" aria-pressed="false">? Maybe</button>
+      <button type="button" data-f="n" aria-pressed="false">✕ No</button>
+      <button type="button" data-f="u" aria-pressed="false">Undecided</button>
+      <button type="button" id="fClear" disabled>Clear filters</button>
+    </div>
+    <div class="status" id="cNote"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <footer>Card images are served by Scryfall and are © Wizards of the Coast. Unofficial fan content, not approved or endorsed by Wizards.</footer>
+</div>
+
+<script>
+const TARGET = 120, LS = "plains-picks";
+const NAME = { y: "✓ Yes", m: "? Maybe", n: "✕ No", u: "Undecided" };
+const WORD = { y: "yes", m: "maybe", n: "no" };
+const $ = (id) => document.getElementById(id);
+let cards = [], picks = {}, cur = -1, undo = [];
+const filters = new Set();   // empty means show everything
+
+const verdict = (c) => picks[c.id] || "u";
+const count = (v) => cards.reduce((n, c) => n + (verdict(c) === v), 0);
+
+function nextUndecided(from) {
+  for (let k = 1; k <= cards.length; k++) {
+    const j = (from + k + cards.length) % cards.length;
+    if (!picks[cards[j].id]) return j;
+  }
+  return -1;
+}
+
+function render() {
+  if (!cards.length) return;
+  const y = count("y");
+  $("tY").textContent = "✓ Yes " + y + "/" + TARGET;
+  $("tM").textContent = "? Maybe " + count("m");
+  $("tN").textContent = "✕ No " + count("n");
+  $("tL").textContent = "Undecided " + count("u");
+  $("bUndo").disabled = !undo.length;
+
+  const c = cards[cur];
+  $("card").hidden = !c; $("done").hidden = !!c;
+  for (const b of ["bNo", "bMaybe", "bYes"]) $(b).disabled = !c;
+  if (!c) { $("mWhere").textContent = ""; $("mData").textContent = ""; $("stamp").hidden = true; }
+  else {
+    if ($("card").dataset.id !== c.id) { $("card").src = c.img; $("card").dataset.id = c.id; }
+    $("card").alt = "Plains from " + c.n + ", art by " + c.a;
+    $("mWhere").textContent = c.n + " (" + c.y + ") · " + c.a;
+    $("mData").replaceChildren(c.s + " #" + c.c + (c.f ? " · full art" : "") + " · €" + c.p.toFixed(2) + " · ");
+    const a = document.createElement("a"); a.href = c.u; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Scryfall";
+    $("mData").append(a);
+    showStamp(picks[c.id]);
+    let j = cur;
+    for (let k = 0; k < 3; k++) { j = nextUndecided(j); if (j < 0 || j === cur) break; new Image().src = cards[j].img; }
+  }
+  if (!$("catalog").hidden) renderCatalog();
+}
+
+function showStamp(v) {
+  const s = $("stamp");
+  s.hidden = !v; s.className = "stamp " + (v || ""); s.textContent = v ? NAME[v] : "";
+}
+
+function renderCatalog() {
+  for (const b of $("filters").querySelectorAll("[data-f]")) {
+    b.textContent = NAME[b.dataset.f] + " (" + count(b.dataset.f) + ")";
+    b.setAttribute("aria-pressed", String(filters.has(b.dataset.f)));
+  }
+  $("fClear").disabled = !filters.size;
+  const list = cards.filter((c) => !filters.size || filters.has(verdict(c)));
+  const sum = cards.reduce((s, c) => s + (picks[c.id] === "y" ? c.p : 0), 0);
+  $("cNote").textContent = "Showing " + list.length + " of " + cards.length + ". Yes pile is about €" + sum.toFixed(2) +
+    " at market price. Tap a card to open it and change its verdict.";
+  const g = $("grid");
+  g.replaceChildren(...list.map((c) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "thumb"; b.title = c.n + " (" + c.y + "), " + c.a + ", €" + c.p.toFixed(2);
+    const im = document.createElement("img"); im.loading = "lazy"; im.src = c.img; im.alt = b.title;
+    b.append(im);
+    if (picks[c.id]) { const t = document.createElement("b"); t.className = picks[c.id]; t.textContent = NAME[picks[c.id]].slice(0, 1); b.append(t); }
+    b.onclick = () => { cur = c.i; setView(false); };
+    return b;
+  }));
+  if (!list.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "No cards match these filters."; g.append(p); }
+}
+
+function setView(catalog) {
+  $("catalog").hidden = !catalog; $("sort").hidden = catalog;
+  $("viewBtn").textContent = catalog ? "Back to sorting" : "Show catalog";
+  if (!catalog && cur < 0) cur = nextUndecided(-1);
+  render();
+}
+
+function save(id, v) {
+  if (v) picks[id] = v; else delete picks[id];
+  try { localStorage.setItem(LS, JSON.stringify(picks)); $("status").textContent = "Saved in this browser."; }
+  catch (e) { $("status").textContent = "This browser is not saving picks. Export JSON before closing the page."; }
+}
+
+function decide(v) {
+  const c = cards[cur]; if (!c) return;
+  undo.push({ i: cur, prev: picks[c.id] });
+  save(c.id, v);
+  cur = nextUndecided(cur);
+  render();
+}
+
+function undoLast() {
+  const u = undo.pop(); if (!u) return;
+  save(cards[u.i].id, u.prev);
+  cur = u.i; setView(false);
+}
+
+function exportJson() {
+  const pile = (v) => cards.filter((c) => picks[c.id] === v)
+    .map((c) => ({ id: c.id, set: c.s, number: c.c, set_name: c.n, year: c.y, artist: c.a, eur: c.p, scryfall: c.u }));
+  const out = { app: "plains-picker", version: 1, exported_at: new Date().toISOString(),
+    counts: { yes: count("y"), maybe: count("m"), no: count("n"), undecided: count("u") },
+    yes: pile("y"), maybe: pile("m"), no: pile("n") };
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
+  a.download = "plains-picks.json";
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+$("bNo").onclick = () => decide("n");
+$("bMaybe").onclick = () => decide("m");
+$("bYes").onclick = () => decide("y");
+$("bUndo").onclick = undoLast;
+$("bExport").onclick = exportJson;
+$("viewBtn").onclick = () => setView($("catalog").hidden);
+$("filters").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "fClear") filters.clear();
+  else if (!filters.delete(b.dataset.f)) filters.add(b.dataset.f);
+  renderCatalog();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !$("catalog").hidden) return;
+  const k = e.key.toLowerCase();
+  if (k === "arrowleft" || k === "a") decide("n");
+  else if (k === "arrowdown" || k === "s") decide("m");
+  else if (k === "arrowright" || k === "d") decide("y");
+  else if (k === "z" || k === "backspace") undoLast();
+  else return;
+  e.preventDefault();
+});
+
+// Drag the card: right is Yes, left is No, down is Maybe.
+let drag = null;
+const stage = $("stage"), cardEl = $("card");
+const verdictOf = (dx, dy) => (dx > 70 ? "y" : dx < -70 ? "n" : dy > 70 ? "m" : null);
+stage.addEventListener("pointerdown", (e) => { if (cards[cur]) { drag = { x: e.clientX, y: e.clientY }; stage.setPointerCapture(e.pointerId); } });
+stage.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = Math.max(0, e.clientY - drag.y);
+  cardEl.style.transform = "translate(" + dx + "px," + dy + "px) rotate(" + dx / 30 + "deg)";
+  showStamp(verdictOf(dx, dy) || (cards[cur] && picks[cards[cur].id]));
+});
+const endDrag = (e) => {
+  if (!drag) return;
+  const v = e.type === "pointerup" ? verdictOf(e.clientX - drag.x, e.clientY - drag.y) : null;
+  drag = null; cardEl.style.transform = "";
+  if (v) decide(v); else render();
+};
+stage.addEventListener("pointerup", endDrag);
+stage.addEventListener("pointercancel", endDrag);
+
+async function start() {
+  try { cards = await (await fetch("meta.json")).json(); }
+  catch (e) { $("mWhere").textContent = "The card list did not load. Reload the page."; return; }
+  try {
+    const stored = JSON.parse(localStorage.getItem(LS) || "{}");
+    for (const c of cards) if (WORD[stored[c.id]]) picks[c.id] = stored[c.id];
+  } catch (e) {}
+  $("status").textContent = "Picks are kept in this browser. Export JSON to share them.";
+  cur = nextUndecided(-1);
+  render();
+}
+start();
+</script>
+</body>
+</html>
