@@ -55,6 +55,8 @@ a { color: inherit; }
 #bYes { background: var(--yes); border-color: var(--yes); color: var(--on); }
 #bMaybe { border: 2px dashed var(--maybe); }
 .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.xtag { font-family: var(--data); font-size: 12px; font-weight: 600; padding: 1px 6px; border: 1.5px dotted var(--fg); border-radius: 4px; white-space: nowrap; }
+.thumb i { position: absolute; left: 4px; top: 4px; font-style: normal; line-height: 1; font-size: 11px; font-weight: 600; padding: 2px 4px; border-radius: 4px; background: var(--panel); border: 1.5px dotted var(--fg); }
 .order { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); }
 select { font: inherit; color: var(--fg); background: var(--panel); border: 1.5px solid var(--line); border-radius: 6px; padding: 7px 8px; }
 .row .status { flex: 1 1 100%; }
@@ -97,7 +99,7 @@ footer { font-size: 11px; color: var(--dim); }
       <p class="done" id="done" hidden>Every card has a verdict. Open the catalog to change one, or export your picks.</p>
     </div>
     <div class="meta">
-      <span class="where" id="mWhere">Loading the cards…</span>
+      <span class="where"><span id="mWhere">Loading the cards…</span> <span class="xtag" id="mX" hidden></span></span>
       <span class="data" id="mData"></span>
     </div>
     <div class="verdicts">
@@ -115,6 +117,7 @@ footer { font-size: 11px; color: var(--dim); }
           <option value="mix">Shuffled</option>
         </select>
       </label>
+      <label class="order"><input type="checkbox" id="hideX" checked> Hide crossovers</label>
       <button id="bForget" type="button">Forget all choices</button>
       <span class="status" id="status"></span>
     </div>
@@ -140,7 +143,9 @@ const TARGET = 120, LS = "plains-picks";
 const NAME = { y: "✓ Yes", m: "? Maybe", n: "✕ No", u: "Undecided" };
 const WORD = { y: "yes", m: "maybe", n: "no" };
 const $ = (id) => document.getElementById(id);
-let cards = [], picks = {}, cur = -1, undo = [];
+// `all` is every card in meta.json; `cards` is the part on show, in the chosen order.
+// A crossover is a card from a franchise outside Magic (its `x` names the franchise).
+let all = [], cards = [], picks = {}, cur = -1, undo = [];
 const filters = new Set();   // empty means show everything
 
 // Each card keeps `o`, its place in meta.json (cheapest first); `i` is its place in the current order.
@@ -152,7 +157,7 @@ const ORDERS = {
   mix: (a, b) => a.r - b.r,
 };
 function applyOrder(mode) {
-  cards.sort(ORDERS[mode] || ORDERS.price);
+  cards = all.filter((c) => !c.x || !$("hideX").checked).sort(ORDERS[mode] || ORDERS.price);
   cards.forEach((c, i) => { c.i = i; });
   cur = nextUndecided(-1);
 }
@@ -185,8 +190,10 @@ function render() {
   const c = cards[cur];
   $("card").hidden = !c; $("done").hidden = !!c;
   for (const b of ["bNo", "bMaybe", "bYes"]) $(b).disabled = !c;
+  $("mX").hidden = !(c && c.x);
   if (!c) { $("mWhere").textContent = ""; $("mData").textContent = ""; $("stamp").hidden = true; }
   else {
+    $("mX").textContent = "Crossover: " + c.x;
     if ($("card").dataset.id !== c.id) { $("card").src = c.img; $("card").dataset.id = c.id; }
     $("card").alt = "Plains from " + c.n + ", art by " + c.a;
     $("mWhere").textContent = c.n + " (" + c.y + ") · " + c.a;
@@ -218,7 +225,8 @@ function renderCatalog() {
   const g = $("grid");
   g.replaceChildren(...list.map((c) => {
     const b = document.createElement("button");
-    b.type = "button"; b.className = "thumb"; b.title = c.n + " (" + c.y + "), " + c.a + ", €" + c.p.toFixed(2);
+    b.type = "button"; b.className = "thumb"; b.title = c.n + " (" + c.y + "), " + c.a + ", €" + c.p.toFixed(2) + (c.x ? ", crossover: " + c.x : "");
+    if (c.x) { const x = document.createElement("i"); x.textContent = "crossover"; b.append(x); }
     const im = document.createElement("img"); im.loading = "lazy"; im.src = c.img; im.alt = b.title;
     b.append(im);
     if (picks[c.id]) { const t = document.createElement("b"); t.className = picks[c.id]; t.textContent = NAME[picks[c.id]].slice(0, 1); b.append(t); }
@@ -267,11 +275,13 @@ function forgetAll() {
 }
 
 function exportJson() {
-  const pile = (v) => cards.filter((c) => picks[c.id] === v)
-    .map((c) => ({ id: c.id, set: c.s, number: c.c, set_name: c.n, year: c.y, artist: c.a, eur: c.p, scryfall: c.u }));
+  // The export covers every card with a verdict, hidden crossovers included.
+  const pile = (v) => all.filter((c) => picks[c.id] === v).sort(ORDERS.price)
+    .map((c) => ({ id: c.id, set: c.s, number: c.c, set_name: c.n, year: c.y, artist: c.a, eur: c.p, crossover: c.x || null, scryfall: c.u }));
+  const yes = pile("y"), maybe = pile("m"), no = pile("n");
   const out = { app: "plains-picker", version: 1, exported_at: new Date().toISOString(),
-    counts: { yes: count("y"), maybe: count("m"), no: count("n"), undecided: count("u") },
-    yes: pile("y"), maybe: pile("m"), no: pile("n") };
+    counts: { yes: yes.length, maybe: maybe.length, no: no.length, undecided: all.length - yes.length - maybe.length - no.length },
+    yes: yes, maybe: maybe, no: no };
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
   a.download = "plains-picks.json";
@@ -285,8 +295,8 @@ $("bYes").onclick = () => decide("y");
 $("bUndo").onclick = undoLast;
 $("bExport").onclick = exportJson;
 $("bForget").onclick = forgetAll;
-$("order").onchange = () => {
-  try { localStorage.setItem(LS + "-order", $("order").value); } catch (e) {}
+$("order").onchange = $("hideX").onchange = () => {
+  try { localStorage.setItem(LS + "-order", $("order").value); localStorage.setItem(LS + "-crossovers", $("hideX").checked ? "hide" : "show"); } catch (e) {}
   applyOrder($("order").value);
   render();
 };
@@ -329,16 +339,16 @@ stage.addEventListener("pointerup", endDrag);
 stage.addEventListener("pointercancel", endDrag);
 
 async function start() {
-  try { cards = await (await fetch("meta.json")).json(); }
+  try { all = await (await fetch("meta.json")).json(); }
   catch (e) { $("mWhere").textContent = "The card list did not load. Reload the page."; return; }
   try {
     const stored = JSON.parse(localStorage.getItem(LS) || "{}");
-    for (const c of cards) if (WORD[stored[c.id]]) picks[c.id] = stored[c.id];
+    for (const c of all) if (WORD[stored[c.id]]) picks[c.id] = stored[c.id];
   } catch (e) {}
-  const ranks = seededRanks(cards.length);
-  cards.forEach((c, i) => { c.o = i; c.r = ranks[i]; });
+  const ranks = seededRanks(all.length);
+  all.forEach((c, i) => { c.o = i; c.r = ranks[i]; });
   let mode = "price";
-  try { mode = localStorage.getItem(LS + "-order") || "price"; } catch (e) {}
+  try { mode = localStorage.getItem(LS + "-order") || "price"; $("hideX").checked = localStorage.getItem(LS + "-crossovers") !== "show"; } catch (e) {}
   if (!ORDERS[mode]) mode = "price";
   $("order").value = mode;
   $("status").textContent = "Picks are kept in this browser. Export JSON to share them.";
